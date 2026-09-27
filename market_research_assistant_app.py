@@ -80,9 +80,13 @@ class LLM:
         )
 
 
-def decompose_query(llm: LLM, brief: str) -> list:
-    system = "You are a research planner. Break the brief into 4 specific web-searchable sub-questions. Return ONLY a numbered list."
-    text = llm.complete(system, f'Research brief: "{brief}"', max_tokens=300)
+def decompose_query(llm: LLM, brief: str, company: str, market: str) -> list:
+    system = (
+        "You are a research planner. Break the brief into 4 specific web-searchable sub-questions. "
+        "Return ONLY a numbered list. You MUST include the company name in every sub-question so it functions as a valid web search."
+    )
+    user_prompt = f"Company: {company}\nMarket: {market}\nBrief: {brief}"
+    text = llm.complete(system, user_prompt, max_tokens=300)
     lines = [l.strip(" -.*") for l in text.split("\n") if l.strip()]
     questions = [l.split(".", 1)[-1].strip() if l[:2].rstrip(".").isdigit() else l for l in lines]
     return [q for q in questions if len(q) > 8][:5] or [brief]
@@ -131,7 +135,7 @@ def run_pipeline(llm: LLM, brief: str, company: str, market: str, progress_cb=No
     result = ResearchResult(brief=brief)
 
     if progress_cb: progress_cb(0.1, "Decomposing brief…")
-    result.sub_questions = decompose_query(llm, brief)
+    result.sub_questions = decompose_query(llm, brief, company, market)
 
     all_sources = []
     for i, q in enumerate(result.sub_questions):
