@@ -1,11 +1,4 @@
-# Core app + free web search (no API key needed)
 streamlit>=1.32
 duckduckgo-search>=6.1
-
-# Free local AI model (no API key needed) — this is the default "LLM" backend
-transformers>=4.40
-torch>=2.2
-sentencepiece>=0.2
-
-# Optional: only needed if you choose to use Claude instead of the local model
+groq>=0.9.0
 anthropic>=0.34
