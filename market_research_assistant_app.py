@@ -56,16 +56,19 @@ class LLM:
     def complete(self, system: str, user: str, max_tokens: int = 800) -> str:
         if self.backend == "huggingface":
             try:
-                # Format prompt for Zephyr/Mistral style instruction models
-                prompt = f"<|system|>\n{system}</s>\n<|user|>\n{user}</s>\n<|assistant|>\n"
-                response = self.client.text_generation(
-                    prompt,
-                    max_new_tokens=max_tokens,
-                    temperature=0.2,
-                    return_full_text=False
+                # Use chat_completion instead of text_generation to fix the task mismatch
+                messages = [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user}
+                ]
+                response = self.client.chat_completion(
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=0.2
                 )
-                return response.strip()
+                return response.choices[0].message.content.strip()
             except Exception as e:
+                import streamlit as st
                 st.error(f"Hugging Face API Error: {str(e)}")
                 return f"Error: {str(e)}"
 
