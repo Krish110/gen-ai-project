@@ -14,16 +14,12 @@ Run with:
     pip install -r requirements.txt
     streamlit run market_research_assistant_app.py
 
-NO API KEY NEEDED BY DEFAULT. The "LLM" steps (summarization, trend
-extraction, SWOT generation) run on a small, free, open-source model
-(google/flan-t5-base) downloaded once from Hugging Face and executed
-locally on your own machine via the `transformers` library — no account,
-no key, no per-call cost. Web search uses the free `duckduckgo-search`
-package — also no key needed.
+This updated version utilizes the Groq API (free tier available) to run 
+Meta's advanced Llama-3.3-70B model at extremely high speeds. 
+Web search uses the free `duckduckgo-search` package — no key needed.
 
-An Anthropic API key is optional: if you have one and want noticeably
-higher-quality output, paste it into the sidebar and the app will use
-Claude instead of the local model for the same steps.
+An Anthropic API key is optional: if you have one and want to use Claude 
+instead of Groq for the same steps, paste it into the sidebar.
 """
 
 import os
@@ -34,8 +30,7 @@ from dataclasses import dataclass, field
 import streamlit as st
 
 # ---------------------------------------------------------------------------
-# Optional dependencies — the app degrades gracefully if they're missing so
-# it can still be reviewed/graded without every package installed.
+# Dependencies — the app degrades gracefully to demo mode if keys/packages are missing
 # ---------------------------------------------------------------------------
 try:
     from duckduckgo_search import DDGS
@@ -50,16 +45,13 @@ except ImportError:
     HAS_ANTHROPIC = False
 
 try:
-    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-    HAS_TRANSFORMERS = True
+    from groq import Groq
+    HAS_GROQ = True
 except ImportError:
-    HAS_TRANSFORMERS = False
+    HAS_GROQ = False
 
-# Free, local, instruction-tuned model — no API key required.
-# "google/flan-t5-small" is faster to download (~300 MB) and enough for a
-# class demo; "google/flan-t5-base" (~1 GB) gives noticeably better quality
-# on a normal laptop CPU. Change this constant to switch.
-LOCAL_MODEL_NAME = "google/flan-t5-base"
+# Groq's high-speed deployment of Meta's Llama 3.3 70B model.
+GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
 
 
 # ---------------------------------------------------------------------------
@@ -87,52 +79,31 @@ class ResearchResult:
 
 
 # ---------------------------------------------------------------------------
-# Local, free model loader — cached so the model downloads/loads only once
-# per Streamlit session, not on every button click.
-# ---------------------------------------------------------------------------
-@st.cache_resource(show_spinner=False)
-def _load_local_model(model_name: str):
-    try:
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-        return tokenizer, model
-    except Exception as e:
-        # Fails gracefully without crashing Streamlit
-        print(f"Error loading local model {model_name}: {e}")
-        return None, None
-
-
-# ---------------------------------------------------------------------------
 # LLM wrapper (Analyst / Writer agents call this)
 # ---------------------------------------------------------------------------
 class LLM:
     """Thin wrapper so the rest of the app doesn't care which backend is used.
 
     Backends, in order of preference:
-      1. "anthropic" — Claude API, only used if the user supplies a key.
-      2. "local"     — free, local, open-source model via `transformers`.
-                       No API key, no cost, runs on the user's own machine.
-      3. "demo"       — offline placeholder text, used only if neither of the
-                       above is available (e.g. transformers isn't installed).
+      1. "anthropic" — Claude API, used if the user supplies an Anthropic key.
+      2. "groq"      — Llama 3 on Groq API, used if a Groq key is supplied.
+      3. "demo"      — Offline placeholder text, used if no keys are provided.
     """
 
-    def __init__(self, api_key: str = "", model: str = "claude-sonnet-4-6",
-                 local_model_name: str = LOCAL_MODEL_NAME):
+    def __init__(self, anthropic_key: str = "", groq_key: str = "", 
+                 anthropic_model: str = "claude-3-5-sonnet-20240620",
+                 groq_model: str = GROQ_MODEL_NAME):
         self.backend = "demo"
         self.client = None
-        self.tokenizer = None
-        self.local_model = None
 
-        if api_key and HAS_ANTHROPIC:
-            self.client = anthropic.Anthropic(api_key=api_key)
-            self.model = model
+        if anthropic_key and HAS_ANTHROPIC:
+            self.client = anthropic.Anthropic(api_key=anthropic_key)
+            self.model = anthropic_model
             self.backend = "anthropic"
-        elif HAS_TRANSFORMERS:
-            self.tokenizer, self.local_model = _load_local_model(local_model_name)
-            if self.tokenizer is not None and self.local_model is not None:
-                self.backend = "local"
-            else:
-                self.backend = "demo"
+        elif groq_key and HAS_GROQ:
+            self.client = Groq(api_key=groq_key)
+            self.model = groq_model
+            self.backend = "groq"
 
     def complete(self, system: str, user: str, max_tokens: int = 800) -> str:
         if self.backend == "anthropic":
@@ -144,27 +115,26 @@ class LLM:
             )
             return "".join(block.text for block in resp.content if block.type == "text")
 
-        if self.backend == "local":
-            # Flan-T5 is instruction-tuned: folding the system instruction and
-            # user content into one prompt works well and needs no chat format.
-            prompt = f"{system.strip()}\n\n{user.strip()}"
-            inputs = self.tokenizer(prompt, return_tensors="pt")
-            outputs = self.local_model.generate(
-                **inputs,
-                max_new_tokens=min(max_tokens, 256),
-                do_sample=False,
+        if self.backend == "groq":
+            resp = self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user}
+                ],
+                temperature=0.2, # Keep outputs grounded for research
             )
-            return self.tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+            return resp.choices[0].message.content.strip()
 
         return self._mock_response(user)
 
     @staticmethod
     def _mock_response(user: str) -> str:
         return (
-            "[DEMO MODE — no local model or API key available. This is "
-            "placeholder text so the pipeline can still be exercised end-to-end. "
-            "Install `transformers` + `torch` (see requirements.txt) to enable "
-            "the free local model.]\n\n"
+            "[DEMO MODE — No API keys provided. This is placeholder text so the "
+            "pipeline can still be exercised end-to-end. Provide a free Groq key "
+            "to generate real analysis.]\n\n"
             f"Simulated analysis based on prompt:\n{textwrap.shorten(user, 200)}"
         )
 
@@ -177,10 +147,10 @@ def decompose_query(llm: LLM, brief: str) -> list:
         "You are a market research planning assistant. Break the brief into "
         "4-5 specific, web-searchable sub-questions covering competitor "
         "positioning, pricing, recent campaigns/news, and market trends. "
-        "Return ONLY a numbered list, one sub-question per line."
+        "Return ONLY a numbered list, one sub-question per line. Do not add introductory text."
     )
     text = llm.complete(system, f'Research brief: "{brief}"', max_tokens=300)
-    lines = [l.strip(" -.") for l in text.split("\n") if l.strip()]
+    lines = [l.strip(" -.*") for l in text.split("\n") if l.strip()]
     # keep lines that look like list items; fall back to the raw brief
     questions = [l.split(".", 1)[-1].strip() if l[:2].rstrip(".").isdigit() else l for l in lines]
     questions = [q for q in questions if len(q) > 8][:5]
@@ -211,9 +181,6 @@ def search_web(query: str, max_results: int = 3) -> list:
 
 # ---------------------------------------------------------------------------
 # Agent 3 — Retrieval / Summarization Agent
-# (In this lightweight prototype, "retrieval" operates directly over search
-#  snippets rather than a full vector store — swap in FAISS/Chroma + an
-#  embedding model for the production version described in the report.)
 # ---------------------------------------------------------------------------
 def summarize_source(llm: LLM, sub_question: str, source: Source) -> str:
     system = (
@@ -239,7 +206,7 @@ def extract_trends(llm: LLM, all_summaries: str) -> str:
 
 def generate_swot(llm: LLM, company: str, market: str, findings: str) -> str:
     system = (
-        "Generate a SWOT analysis (Strengths, Weaknesses, Opportunities, "
+        "Generate a concise SWOT analysis (Strengths, Weaknesses, Opportunities, "
         "Threats) using ONLY the findings provided. Do not introduce facts "
         "not present in the findings. Reference which finding supports each point."
     )
@@ -256,9 +223,6 @@ def generate_recommendations(llm: LLM, swot: str) -> str:
 # Agent 5 — Evaluation / Guardrail Agent
 # ---------------------------------------------------------------------------
 def flag_low_confidence(sources: list) -> list:
-    """Simple heuristic guardrail for the prototype: any sub-question with
-    fewer than 2 corroborating sources is flagged for human review. The
-    production system replaces this with an LLM-as-judge groundedness check."""
     flags = []
     for s in sources:
         if not s.summary or "no relevant information" in s.summary.lower():
@@ -344,23 +308,32 @@ def main():
     with st.sidebar:
         st.header("Configuration")
         st.markdown(
-            "**No API key needed.** By default this runs on a free, local "
-            "open-source model (no account, no cost). An API key is optional "
-            "— only add one if you want higher-quality output from Claude."
+            "To run the analysis, provide a free Groq API key (fastest) OR an "
+            "Anthropic API key. If both are provided, Anthropic takes priority."
         )
-        api_key = st.text_input(
-            "Anthropic API Key (optional)", value=os.environ.get("ANTHROPIC_API_KEY", ""),
-            type="password", help="Leave blank to use the free local model instead."
+        
+        groq_key = st.text_input(
+            "Groq API Key (Free)", value=os.environ.get("GROQ_API_KEY", ""),
+            type="password", help="Get a free key at console.groq.com"
+        )
+        
+        anthropic_key = st.text_input(
+            "Anthropic API Key (Optional)", value=os.environ.get("ANTHROPIC_API_KEY", ""),
+            type="password"
         )
         st.markdown("---")
         st.markdown("**Pipeline status**")
         st.write(f"Web search (duckduckgo-search): {'✅ available' if HAS_DDG else '⚠️ not installed'}")
-        st.write(f"Free local model (transformers): {'✅ available' if HAS_TRANSFORMERS else '⚠️ not installed — run pip install -r requirements.txt'}")
-        st.write(f"Claude API (optional, needs key): {'✅ available' if HAS_ANTHROPIC else '⚠️ SDK not installed'}")
-        active_backend = "Claude API" if (api_key and HAS_ANTHROPIC) else ("Free local model" if HAS_TRANSFORMERS else "Demo/offline")
+        st.write(f"Groq API (groq SDK): {'✅ available' if HAS_GROQ else '⚠️ not installed'}")
+        
+        if anthropic_key and HAS_ANTHROPIC:
+            active_backend = "Claude API"
+        elif groq_key and HAS_GROQ:
+            active_backend = f"Groq API ({GROQ_MODEL_NAME})"
+        else:
+            active_backend = "Demo/Offline"
+            
         st.info(f"Active backend for this run: **{active_backend}**")
-        if active_backend == "Free local model":
-            st.caption(f"Model: {LOCAL_MODEL_NAME} — downloads once (~1 GB) on first run, then runs fully offline.")
         st.markdown("---")
         st.markdown(
             "This prototype implements the architecture in **Section 3** and the "
@@ -389,7 +362,7 @@ def main():
             st.warning("Please fill in company, market, and research brief.")
             return
 
-        llm = LLM(api_key=api_key)
+        llm = LLM(anthropic_key=anthropic_key, groq_key=groq_key)
         progress_bar = st.progress(0.0)
         status = st.empty()
 
