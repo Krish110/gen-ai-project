@@ -50,7 +50,7 @@ except ImportError:
     HAS_ANTHROPIC = False
 
 try:
-    from transformers import pipeline as hf_pipeline
+    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
     HAS_TRANSFORMERS = True
 except ImportError:
     HAS_TRANSFORMERS = False
@@ -91,8 +91,15 @@ class ResearchResult:
 # per Streamlit session, not on every button click.
 # ---------------------------------------------------------------------------
 @st.cache_resource(show_spinner=False)
-def _load_local_pipeline(model_name: str):
-    return hf_pipeline("text2text-generation", model=model_name)
+def _load_local_model(model_name: str):
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        return tokenizer, model
+    except Exception as e:
+        # Fails gracefully without crashing Streamlit
+        print(f"Error loading local model {model_name}: {e}")
+        return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -113,15 +120,19 @@ class LLM:
                  local_model_name: str = LOCAL_MODEL_NAME):
         self.backend = "demo"
         self.client = None
-        self.local_pipe = None
+        self.tokenizer = None
+        self.local_model = None
 
         if api_key and HAS_ANTHROPIC:
             self.client = anthropic.Anthropic(api_key=api_key)
             self.model = model
             self.backend = "anthropic"
         elif HAS_TRANSFORMERS:
-            self.local_pipe = _load_local_pipeline(local_model_name)
-            self.backend = "local"
+            self.tokenizer, self.local_model = _load_local_model(local_model_name)
+            if self.tokenizer is not None and self.local_model is not None:
+                self.backend = "local"
+            else:
+                self.backend = "demo"
 
     def complete(self, system: str, user: str, max_tokens: int = 800) -> str:
         if self.backend == "anthropic":
@@ -137,12 +148,13 @@ class LLM:
             # Flan-T5 is instruction-tuned: folding the system instruction and
             # user content into one prompt works well and needs no chat format.
             prompt = f"{system.strip()}\n\n{user.strip()}"
-            out = self.local_pipe(
-                prompt,
+            inputs = self.tokenizer(prompt, return_tensors="pt")
+            outputs = self.local_model.generate(
+                **inputs,
                 max_new_tokens=min(max_tokens, 256),
                 do_sample=False,
             )
-            return out[0]["generated_text"].strip()
+            return self.tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
 
         return self._mock_response(user)
 
