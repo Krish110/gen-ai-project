@@ -21,8 +21,7 @@ except ImportError:
     HAS_HF = False
 
 # A highly capable open-source model available on HF's free inference tier
-HF_MODEL_NAME = "HuggingFaceH4/zephyr-7b-beta"
-
+HF_MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
 
 @dataclass
 class Source:
@@ -42,7 +41,6 @@ class ResearchResult:
     flagged_claims: list = field(default_factory=list)
     report_markdown: str = ""
     elapsed_seconds: float = 0.0
-
 
 class LLM:
     def __init__(self, hf_token: str = "", model: str = HF_MODEL_NAME):
@@ -165,7 +163,7 @@ def main():
 
     with st.sidebar:
         st.header("Configuration")
-        hf_token = st.text_input("Hugging Face Token (Free)", type="password", help="Get a free 'Read' token at huggingface.co/settings/tokens")
+        hf_token = st.text_input("Hugging Face Token (Free)", type="password", help="Get a free 'Fine-grained' token at huggingface.co/settings/tokens")
         st.info(f"Active backend: **{'Hugging Face API' if hf_token and HAS_HF else 'Demo/Offline'}**")
 
     col1, col2 = st.columns(2)
