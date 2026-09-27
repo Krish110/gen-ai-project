@@ -50,8 +50,8 @@ try:
 except ImportError:
     HAS_GROQ = False
 
-# Groq's universally available Llama 3 model to avoid 404 Not Found errors.
-GROQ_MODEL_NAME = "llama3-8b-8192"
+# Groq's current universally available Llama 3.1 model.
+GROQ_MODEL_NAME = "llama-3.1-8b-instant"
 
 
 # ---------------------------------------------------------------------------
@@ -116,16 +116,20 @@ class LLM:
             return "".join(block.text for block in resp.content if block.type == "text")
 
         if self.backend == "groq":
-            resp = self.client.chat.completions.create(
-                model=self.model,
-                max_tokens=max_tokens,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user}
-                ],
-                temperature=0.2, # Keep outputs grounded for research
-            )
-            return resp.choices[0].message.content.strip()
+            try:
+                resp = self.client.chat.completions.create(
+                    model=self.model,
+                    max_tokens=max_tokens,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user}
+                    ]
+                )
+                return resp.choices[0].message.content.strip()
+            except Exception as e:
+                import streamlit as st
+                st.error(f"Groq API Error: {str(e)}")
+                return f"Error: {str(e)}"
 
         return self._mock_response(user)
 
