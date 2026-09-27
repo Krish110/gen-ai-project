@@ -15,7 +15,7 @@ Run with:
     streamlit run market_research_assistant_app.py
 
 This updated version utilizes the Groq API (free tier available) to run 
-Meta's advanced Llama-3.3-70B model at extremely high speeds. 
+Meta's Llama 3 model at extremely high speeds. 
 Web search uses the free `duckduckgo-search` package — no key needed.
 
 An Anthropic API key is optional: if you have one and want to use Claude 
@@ -50,8 +50,8 @@ try:
 except ImportError:
     HAS_GROQ = False
 
-# Groq's high-speed deployment of Meta's Llama 3.3 70B model.
-GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
+# Groq's universally available Llama 3 model to avoid 404 Not Found errors.
+GROQ_MODEL_NAME = "llama3-8b-8192"
 
 
 # ---------------------------------------------------------------------------
