@@ -54,7 +54,6 @@ class LLM:
     def complete(self, system: str, user: str, max_tokens: int = 800) -> str:
         if self.backend == "huggingface":
             try:
-                # Use chat_completion instead of text_generation to fix the task mismatch
                 messages = [
                     {"role": "system", "content": system},
                     {"role": "user", "content": user}
@@ -82,10 +81,11 @@ class LLM:
 
 def decompose_query(llm: LLM, brief: str, company: str, market: str) -> list:
     system = (
-        "You are a research planner. Break the brief into 4 specific web-searchable sub-questions. "
-        "Return ONLY a numbered list. You MUST include the company name in every sub-question so it functions as a valid web search."
+        "You are a research planner. Break the brief into 4 specific, highly targeted search engine queries. "
+        "Return ONLY a numbered list of keywords. DO NOT use full sentences or conversational questions. "
+        "You MUST include the company name in every query."
     )
-    user_prompt = f"Company: {company}\nMarket: {market}\nBrief: {brief}"
+    user_prompt = f"Company: {company}\nMarket: {market}\nBrief: {brief}\n\nGenerate 4 keyword-based search queries:"
     text = llm.complete(system, user_prompt, max_tokens=300)
     lines = [l.strip(" -.*") for l in text.split("\n") if l.strip()]
     questions = [l.split(".", 1)[-1].strip() if l[:2].rstrip(".").isdigit() else l for l in lines]
@@ -104,8 +104,8 @@ def search_web(query: str, max_results: int = 3) -> list:
     return results
 
 def summarize_source(llm: LLM, sub_question: str, source: Source) -> str:
-    system = "Summarize the snippet in 2 sentences focused on facts relevant to the sub-question. If irrelevant, say so."
-    return llm.complete(system, f"Sub-question: {sub_question}\nSnippet: {source.snippet}", max_tokens=150)
+    system = "Summarize the snippet in 2 sentences focused on facts relevant to the search query. If irrelevant, say so plainly."
+    return llm.complete(system, f"Search Query: {sub_question}\nSnippet: {source.snippet}", max_tokens=150)
 
 def extract_trends(llm: LLM, all_summaries: str) -> str:
     system = "Identify the top 3 recurring trends from these summaries. Keep it concise."
@@ -123,7 +123,7 @@ def flag_low_confidence(sources: list) -> list:
     return [f"Low-confidence: {s.title}" for s in sources if not s.summary or "irrelevant" in s.summary.lower()]
 
 def compile_report(result: ResearchResult, company: str, market: str) -> str:
-    lines = [f"# Market Research: {company} ({market})", "", "## Sub-Questions Investigated"]
+    lines = [f"# Market Research: {company} ({market})", "", "## Search Queries Used"]
     lines += [f"- {q}" for q in result.sub_questions]
     lines += ["", "## Trend Analysis", result.trends, "", "## SWOT Analysis", result.swot, "", "## Recommendations", result.recommendations, "", "## Sources"]
     for i, s in enumerate(result.sources, 1):
@@ -134,7 +134,7 @@ def run_pipeline(llm: LLM, brief: str, company: str, market: str, progress_cb=No
     t0 = time.time()
     result = ResearchResult(brief=brief)
 
-    if progress_cb: progress_cb(0.1, "Decomposing brief…")
+    if progress_cb: progress_cb(0.1, "Generating search queries…")
     result.sub_questions = decompose_query(llm, brief, company, market)
 
     all_sources = []
